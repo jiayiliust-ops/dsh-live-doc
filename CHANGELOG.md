@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-11-17
+
+### Added
+
+- A left-sidebar entry "协作文档 / Live document" that opens a full-page
+  document workspace at any time, even without an active chat session. The
+  workspace lists documents, edits blocks, creates documents, and exports,
+  using the same host API and edit journal as the floating panel.
+- The floating panel and header button remain available for editing beside the
+  conversation.
+
 ## [1.0.0] — 2026-11-17
 
 First public release.

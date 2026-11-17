@@ -129,6 +129,9 @@ window.__ModuleLoader__.load({
 .ld-toggle .dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary);display:none}
 .ld-toggle.has-doc .dot{display:block}
 .ld-layer{position:fixed;inset:0;z-index:80;pointer-events:none}
+.ld-layer.is-embedded{position:static;inset:auto;z-index:auto;pointer-events:auto;height:100%;min-height:0;display:flex}
+.ld-layer.is-embedded .ld-panel{position:static;width:auto!important;min-width:0;max-width:none;height:100%;max-height:none;flex:1;border:0;border-radius:0;box-shadow:none}
+.ld-main{height:100%;min-height:calc(100vh - 120px);display:flex;background:var(--dsw-alias-bg-base)}
 .ld-panel{pointer-events:auto;position:absolute;top:72px;right:18px;bottom:18px;display:flex;flex-direction:column;min-width:420px;max-width:calc(100vw - 48px);background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.32);overflow:hidden;color:var(--dsw-alias-label-primary);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
 .ld-grip{position:absolute;left:0;top:0;bottom:0;width:8px;cursor:col-resize;z-index:2}
 .ld-grip:hover{background:linear-gradient(90deg,var(--dsw-alias-brand-primary),transparent);opacity:.25}
@@ -258,7 +261,8 @@ window.__ModuleLoader__.load({
 
     // ---- panel -----------------------------------------------------------
 
-    function Panel() {
+    function Panel(props = {}) {
+      const embedded = props.embedded === true;
       const [open] = useOpenState();
       const [doc, setDoc] = useState(null);
       const [docs, setDocs] = useState([]);
@@ -337,9 +341,9 @@ window.__ModuleLoader__.load({
         setDoc({ ...incoming, blocks });
       }, []);
 
-      // Poll while open.
+      // Poll while visible: the overlay is open, or the main-panel page is mounted.
       useEffect(() => {
-        if (!open) return undefined;
+        if (!open && !embedded) return undefined;
         let alive = true;
         let timer = null;
         const tick = async () => {
@@ -369,11 +373,11 @@ window.__ModuleLoader__.load({
           alive = false;
           if (timer !== null) clearTimeout(timer);
         };
-      }, [open, applyState]);
+      }, [open, embedded, applyState]);
 
       // Auto-open when a new document is created while the panel is closed.
       useEffect(() => {
-        if (open) return undefined;
+        if (open || embedded) return undefined;
         let alive = true;
         let timer = null;
         const tick = async () => {
@@ -396,7 +400,7 @@ window.__ModuleLoader__.load({
           alive = false;
           if (timer !== null) clearTimeout(timer);
         };
-      }, [open]);
+      }, [open, embedded]);
 
       // Focus a newly created block.
       useEffect(() => {
@@ -635,7 +639,7 @@ window.__ModuleLoader__.load({
         window.localStorage.setItem('dsh.liveDoc.width', String(width));
       }, [width]);
 
-      if (!open) return null;
+      if (!open && !embedded) return null;
 
       const blocks = doc?.blocks ?? [];
       let olIndex = 0;
@@ -674,16 +678,16 @@ window.__ModuleLoader__.load({
       if (doc === null) {
         return h(React.Fragment, null,
           h(Style),
-          h('div', { className: 'ld-layer' },
-            h('div', { className: 'ld-panel', style: { width } },
-              h('div', { className: 'ld-grip', onPointerDown: startResize }),
+          h('div', { className: `ld-layer${embedded ? ' is-embedded' : ''}` },
+            h('div', { className: 'ld-panel', ...(embedded ? {} : { style: { width } }) },
+              embedded ? null : h('div', { className: 'ld-grip', onPointerDown: startResize }),
               h('div', { className: 'ld-head' },
                 h('div', { className: 'ld-titles' },
                   h('div', { className: 'ld-title', style: { cursor: 'default' } }, T.title),
                   h('div', { className: 'ld-status' }, h('span', { className: 'pulse' }), error ?? T.empty)),
                 h('div', { className: 'ld-head-actions' },
                   h('button', { className: 'ld-btn primary', onClick: createDoc }, T.create),
-                  h('button', { className: 'ld-btn', onClick: dismiss }, T.close))),
+                  embedded ? null : h('button', { className: 'ld-btn', onClick: dismiss }, T.close))),
               h('div', { className: 'ld-empty' },
                 h(DocumentIcon, { size: 42 }),
                 h('h3', null, T.empty),
@@ -700,9 +704,9 @@ window.__ModuleLoader__.load({
 
       return h(React.Fragment, null,
         h(Style),
-        h('div', { className: 'ld-layer' },
-          h('div', { className: 'ld-panel', style: { width } },
-            h('div', { className: 'ld-grip', onPointerDown: startResize }),
+        h('div', { className: `ld-layer${embedded ? ' is-embedded' : ''}` },
+          h('div', { className: 'ld-panel', ...(embedded ? {} : { style: { width } }) },
+            embedded ? null : h('div', { className: 'ld-grip', onPointerDown: startResize }),
             h('div', { className: 'ld-head' },
               h('div', { className: 'ld-titles' },
                 h('input', {
@@ -731,7 +735,7 @@ window.__ModuleLoader__.load({
                 }, docs.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title))),
                 h('button', { className: 'ld-btn', onClick: createDoc }, T.create),
                 h('button', { className: 'ld-btn primary', onClick: () => void exportDoc() }, T.export),
-                h('button', { className: 'ld-btn', onClick: dismiss }, T.close))),
+                embedded ? null : h('button', { className: 'ld-btn', onClick: dismiss }, T.close))),
             h('div', { className: 'ld-tools' },
               toolButton(T.p, () => retype('p')),
               toolButton(T.h1, () => retype('h1')),
@@ -798,6 +802,18 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dot' })));
     }
 
+    // ---- left sidebar / full-page app ------------------------------------
+
+    /** The glyph used by the left sidebar's global panel row. */
+    function SidebarIcon(props = {}) {
+      return DocumentIcon(props.size ?? 18);
+    }
+
+    /** The full-page document workspace opened from the left sidebar. */
+    function LiveDocPage() {
+      return h('div', { className: 'ld-main' }, h(Panel, { embedded: true }));
+    }
+
     // ---- plugin ----------------------------------------------------------
 
     return {
@@ -826,6 +842,20 @@ window.__ModuleLoader__.load({
           order: 25,
           label: () => T.open,
         }, HeaderButton)), 'live-doc: toggle');
+
+        // The left sidebar row addresses this main panel by the same id.
+        ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
+          name: 'main',
+          key: 'live-doc',
+          label: () => T.title,
+        }, LiveDocPage)), 'live-doc: main panel');
+
+        ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+          name: 'sidebar.panellist',
+          id: 'live-doc',
+          order: 35,
+          label: () => T.title,
+        }, SidebarIcon)), 'live-doc: sidebar row');
       },
     };
   },

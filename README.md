@@ -21,6 +21,7 @@ Long documents are painful to generate in one shot: the model writes 5,000 words
 
 ## Features
 
+- **Left sidebar workspace** — a global **Live document** row in the left sidebar opens a full-page document workspace at any time, even without a chat session. The floating panel and header button remain for editing beside the conversation.
 - **Block-level co-editing** — headings 1–3, paragraphs, bullet and numbered lists, quotes, code, dividers; bold / italic / underline; Enter creates the next paragraph, Backspace on an empty one deletes it.
 - **One shared document** — agent tools and the browser panel read and write the same block list; the browser saves with a per-block base revision, so an agent write and your edit never silently overwrite each other.
 - **Edit journal** — `doc_read` reports “the user changed N paragraphs after your last read” with before/after snippets, and tells the model to follow your version.
@@ -66,7 +67,7 @@ Installing a tarball is the most durable option: the profile keeps its own copy,
 
    > 写一份课程论文，题目是……，我们边写边改。
 
-2. The agent calls `doc_create`; the **协作文档 / Live document** panel opens on the right. You can also open it from the button in the session header.
+2. The agent calls `doc_create`; the **协作文档 / Live document** panel opens on the right. You can also open the full-page workspace from the **Live document** row in the left sidebar, or the button in the session header.
 3. The agent calls `doc_append` one to three paragraphs at a time. Edit anything you like in the panel while it works.
 4. When the agent continues, it calls `doc_read` first, sees your edits, and follows them.
 5. Ask for the export; `doc_export` writes `<workspace>/<title>.docx`. The panel stays open, and exporting again overwrites the same file.
