@@ -20,11 +20,27 @@ two commits on `main`.
    use **Repository → Push** once more, or create the release on GitHub from the
    tag.
 
-Suggested repository description:
+### Copy-paste descriptions
 
-> Live co-editing for DeepSeek Harness: the agent writes, you edit the same document in real time, and the agent reads your edits before it writes again. Exports .docx without Office.
+**GitHub repository description** (About field, one line, ≤ 350 chars) — pick one:
 
-Suggested topics: `deepseek-harness`, `dsh-plugin`, `docx`, `collaborative-editing`, `office`.
+> Live co-editing for DeepSeek Harness · AI 在写、你同时改、同一份文档；AI 下次落笔前会读到你改过的版本，导出标准 .docx，无需 Office。
+
+> Live co-editing for DeepSeek Harness: the agent writes, you edit the same document in real time, and the agent reads your edits before it writes again. Exports .docx with no Office required.
+
+> DeepSeek Harness 实时协作文档插件：AI 写作与你的修改发生在同一份文档里，AI 下一次落笔前会读到你改过的段落；零依赖导出标准 .docx。
+
+**GitHub topics** (About → Topics):
+
+`deepseek-harness` `dsh-plugin` `dsh-bundle` `deepseek` `docx` `word` `collaborative-editing` `live-editing` `office` `javascript` `plugin`
+
+**npm description** — `package.json` already contains a publishable one. If you prefer the shorter search-friendly variant, replace line 4 before the first publish:
+
+> Live co-editing document panel for DeepSeek Harness (DSH): the agent writes, you edit in real time, edits are read back on the next tool call. Dependency-free .docx export.
+
+**GitHub Release notes** — paste [docs/RELEASE-NOTES-v1.0.0.md](docs/RELEASE-NOTES-v1.0.0.md).
+
+Do not put the install command or a feature list in the GitHub About field: the About line is for search and for a one-glance "what is this". Put features in the README and the release.
 
 ## Command-line alternative
 
