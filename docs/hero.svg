@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="dsh-live-doc: the agent writes and you edit the same document">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="0.55" stop-color="#101a2e"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f2f6fd"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1080" cy="80" r="220" fill="#1d4ed8" opacity="0.12"/>
+  <circle cx="120" cy="600" r="200" fill="#4f46e5" opacity="0.10"/>
+
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+    <text x="64" y="86" fill="#e8eefc" font-size="38" font-weight="700" letter-spacing="0.5">dsh-live-doc</text>
+    <text x="64" y="124" fill="#93a4c4" font-size="18">写与改，发生在同一份文档里 · Live co-editing for DeepSeek Harness</text>
+    <rect x="64" y="146" width="132" height="30" rx="15" fill="#1e293b" stroke="#334155"/>
+    <text x="80" y="167" fill="#7dd3fc" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">dsh.bundle</text>
+  </g>
+
+  <!-- chat column -->
+  <g filter="url(#shadow)">
+    <rect x="64" y="214" width="392" height="346" rx="18" fill="#111b2e" stroke="#223049"/>
+  </g>
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <text x="90" y="250" fill="#8fa3c4" font-size="13" letter-spacing="1">对话</text>
+    <rect x="88" y="268" width="286" height="54" rx="12" fill="#1b2a44"/>
+    <text x="104" y="292" fill="#dbe7ff" font-size="14">写一份课程论文，我们边写边改。</text>
+    <text x="104" y="311" fill="#7f93b5" font-size="12">— 你</text>
+
+    <rect x="88" y="336" width="330" height="42" rx="12" fill="#16233a"/>
+    <text x="104" y="362" fill="#a9b8d3" font-size="13">doc_create · 打开协作文档面板</text>
+
+    <rect x="88" y="390" width="318" height="42" rx="12" fill="#16233a"/>
+    <text x="104" y="416" fill="#a9b8d3" font-size="13">doc_append · 第一段已经出现</text>
+
+    <rect x="88" y="444" width="344" height="42" rx="12" fill="#16233a"/>
+    <text x="104" y="470" fill="#a9b8d3" font-size="13">doc_read · 读到你刚改的两段</text>
+
+    <g transform="translate(88, 506)">
+      <circle cx="10" cy="10" r="6" fill="#22c55e"/>
+      <text x="26" y="15" fill="#8fa3c4" font-size="12.5">AI 每次落笔前都以你的版本为准</text>
+    </g>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="url(#accent)" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <path d="M474 330 C 506 330, 512 318, 552 318" marker-end="url(#arrow)"/>
+    <path d="M552 392 C 512 392, 506 380, 474 380" marker-end="url(#arrow2)"/>
+  </g>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7aa2ff"/>
+    </marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto">
+      <path d="M10 0 L0 5 L10 10 z" fill="#7aa2ff"/>
+    </marker>
+  </defs>
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif" fill="#93a9d6" font-size="11">
+    <text x="474" y="302">AI 写入 · 实时出现</text>
+    <text x="474" y="414">你的修改 · 自动回读</text>
+  </g>
+
+  <!-- document column -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="178" width="524" height="418" rx="18" fill="#0e1728" stroke="#223049"/>
+  </g>
+  <rect x="620" y="178" width="524" height="46" rx="18" fill="#141f33"/>
+  <rect x="620" y="208" width="524" height="16" fill="#141f33"/>
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <circle cx="646" cy="201" r="5" fill="#f87171"/>
+    <circle cx="663" cy="201" r="5" fill="#fbbf24"/>
+    <circle cx="680" cy="201" r="5" fill="#34d399"/>
+    <text x="712" y="206" fill="#c7d6f2" font-size="13">协作文档 · 课程论文</text>
+    <g transform="translate(1010, 190)">
+      <circle cx="7" cy="10" r="4.5" fill="#38bdf8"/>
+      <text x="18" y="14" fill="#7dd3fc" font-size="11.5">已同步</text>
+    </g>
+  </g>
+
+  <g filter="url(#soft)">
+    <rect x="646" y="246" width="472" height="322" rx="10" fill="url(#paper)"/>
+  </g>
+  <g font-family="PingFang SC, Songti SC, SimSun, serif">
+    <text x="676" y="294" fill="#111827" font-size="20" font-weight="700">生成式人工智能对学习方式的影响</text>
+    <text x="676" y="332" fill="#1f2937" font-size="15" font-weight="700">一、引言</text>
+    <rect x="676" y="346" width="408" height="9" rx="4.5" fill="#dbe3ef"/>
+    <rect x="676" y="364" width="378" height="9" rx="4.5" fill="#dbe3ef"/>
+    <rect x="676" y="382" width="434" height="9" rx="4.5" fill="#dbe3ef"/>
+
+    <text x="676" y="422" fill="#1f2937" font-size="15" font-weight="700">二、三个变化</text>
+
+    <rect x="676" y="436" width="440" height="46" rx="7" fill="#e8f0ff" stroke="#93b4ff" stroke-dasharray="5 4"/>
+    <circle cx="692" cy="453" r="3.5" fill="#2563eb"/>
+    <text x="706" y="458" fill="#1e3a8a" font-size="13">把 AI 当作陪练而不是代笔，是更稳妥的定位。</text>
+    <rect x="706" y="468" width="7" height="12" rx="1.5" fill="#2563eb">
+      <animate attributeName="opacity" values="1;0.15;1" dur="1.4s" repeatCount="indefinite"/>
+    </rect>
+    <text x="720" y="478" fill="#64748b" font-size="11.5">你正在改这一段</text>
+
+    <rect x="676" y="500" width="408" height="9" rx="4.5" fill="#dbe3ef"/>
+    <rect x="676" y="518" width="368" height="9" rx="4.5" fill="#dbe3ef"/>
+  </g>
+
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <rect x="930" y="518" width="172" height="30" rx="15" fill="#eef4ff" stroke="#bcd0f7"/>
+    <text x="946" y="538" fill="#1d4ed8" font-size="11.5">你的修改 → AI 已读到</text>
+  </g>
+
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <text x="64" y="606" fill="#5f7191" font-size="12">DeepSeek Harness · 协作文档插件 · 导出标准 .docx，无需 Office</text>
+  </g>
+</svg>

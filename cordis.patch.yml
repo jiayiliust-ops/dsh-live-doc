@@ -1,0 +1,12 @@
+# dsh-live-doc —— bundle layer
+#
+# `package.json` declares `dsh.bundle.patch`. The loader inserts the row below
+# into the profile composition. Keep one row per entry point: registering the
+# same plugin file twice makes the second row collide with the first.
+#
+# Users can override this row from the profile's `cordis.patch.yml` by id:
+#   - id: live-doc
+#     name: 'dsh-live-doc'
+- insert:
+    - id: live-doc
+      name: 'dsh-live-doc'

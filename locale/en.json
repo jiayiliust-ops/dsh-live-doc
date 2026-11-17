@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Live document",
+    "description": "The agent and you edit the same document: a live panel shows every paragraph as it is written, your edits are saved in place, and the agent reads them before it writes again. Exports .docx with no Office installed.",
+    "detail": "docs/DETAIL.md"
+  }
+}
