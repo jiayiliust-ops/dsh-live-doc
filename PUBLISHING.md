@@ -5,6 +5,28 @@ repository. The metadata already points at `jiayiliust-ops`; change the three
 URLs in `package.json` (`repository`, `homepage`, `bugs`) and the README install
 commands if you publish under a different account.
 
+## One command with a token (CLI)
+
+If you prefer the terminal over GitHub Desktop, this repository ships
+`scripts/publish-github.sh`. It verifies the account, creates the repository if
+it does not exist, pushes `main` and the `v1.0.0` tag, and sets the topics. It
+never stores the token or prints it.
+
+1. Create a classic token with the `repo` scope:
+   <https://github.com/settings/tokens/new?scopes=repo&description=dsh-live-doc>
+2. In Terminal:
+
+```bash
+cd ~/Documents/dsh-live-doc
+read -rs GH_TOKEN && export GH_TOKEN && ./scripts/publish-github.sh
+```
+
+The `read -s` prompt does not echo the token. If you use a shell that keeps
+history, `read -rs` is safer than putting the token in the command line.
+
+The script ends with the repository URL. Then create the release from the pushed
+`v1.0.0` tag and paste `docs/RELEASE-NOTES-v1.0.0.md`.
+
 ## Fastest path: GitHub Desktop (this Mac)
 
 GitHub Desktop is installed and this checkout is already a git repository with

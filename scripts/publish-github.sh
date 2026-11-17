@@ -68,7 +68,7 @@ print(json.dumps({
 }))
 PY
 )"
-  api -X POST https://api.github.com/user/repos -d "$PAYLOAD" >/dev/null
+  api -X POST https://api.github.com/user/repos -H "Content-Type: application/json" -d "$PAYLOAD" >/dev/null
   echo "Created $OWNER/$REPO"
 fi
 
@@ -90,7 +90,7 @@ print(json.dumps({"names": [
 ]}))
 PY
 )"
-api -X PUT "https://api.github.com/repos/$OWNER/$REPO/topics" -d "$TOPICS" >/dev/null || true
+api -X PUT "https://api.github.com/repos/$OWNER/$REPO/topics" -H "Content-Type: application/json" -d "$TOPICS" >/dev/null || true
 
 echo
 echo "Published: https://github.com/$OWNER/$REPO"
