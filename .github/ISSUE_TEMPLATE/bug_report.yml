@@ -1,0 +1,66 @@
+name: Bug report
+description: Something broke in the panel, a doc_* tool, or the DOCX export.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove private document text from logs and screenshots.
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version
+      description: From About, or `dsh --version`.
+      placeholder: 0.2.2-rc.3
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Output of `node -v` (the Node that runs DSH).
+      placeholder: v24.21.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Live panel (editing, sync, layout)
+        - Agent tools (doc_create / doc_append / doc_read / ...)
+        - DOCX or Markdown export
+        - Installation or activation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Ask the agent to ...
+        2. Edit paragraph ...
+        3. Call doc_read ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, errors, or screenshots
+      description: Paste error text or drag images. Remove private content first.
+    validations:
+      required: false

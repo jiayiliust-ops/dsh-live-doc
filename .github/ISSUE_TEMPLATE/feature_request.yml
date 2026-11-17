@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability for the live document or its export.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the workflow, not just the missing control.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Live panel editing
+        - Agent tools / co-editing protocol
+        - DOCX output (styles, tables, images, footnotes)
+        - Markdown output
+        - Performance or large documents
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, other plugins, or Word features you use today.
+    validations:
+      required: false
