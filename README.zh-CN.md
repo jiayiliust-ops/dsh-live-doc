@@ -30,7 +30,7 @@
 
 ## 要求
 
-- DeepSeek Harness `>= 0.2.1-rc.2 < 0.3.0`（在 `0.2.2-rc.3` 的 Desktop / Web 上验证）
+- DeepSeek Harness `>= 0.2.1-rc.2 < 0.3.0`（在 `0.2.2-rc.3` 的 Desktop profile 上验证）
 - Node.js `>= 22.19.0`（DOCX 写入器用到 `node:zlib` 的 `crc32`）
 - 没有其他运行时依赖；浏览器半边用宿主提供的 React 模块
 

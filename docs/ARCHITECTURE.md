@@ -165,6 +165,9 @@ styles; list paragraphs reference `numId` 1 (bullet) or 2 (decimal) in
   heading/numbering/bold tags, escaped text, empty document.
 - `test/tool.test.js` — parameter DSL, definition validation, client wrapper,
   manifest, one-row patch.
+- `test/plugin.test.js` — boots the real Host entry against a fake Cordis
+  context (tools, prompt section, route) and runs create → append → read →
+  export with a temporary document directory.
 
 Everything runs with Node built-ins; CI has no install step.
 

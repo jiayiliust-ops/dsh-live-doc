@@ -31,7 +31,7 @@ Long documents are painful to generate in one shot: the model writes 5,000 words
 
 ## Requirements
 
-- DeepSeek Harness `>= 0.2.1-rc.2 < 0.3.0` (tested on `0.2.2-rc.3`, Desktop and Web).
+- DeepSeek Harness `>= 0.2.1-rc.2 < 0.3.0` (verified on the Desktop profile of `0.2.2-rc.3`).
 - Node.js `>= 22.19.0` (the DOCX writer uses `node:zlib`'s `crc32`).
 - No other runtime dependency. The browser half uses the host's React module table.
 
