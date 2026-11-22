@@ -1,7 +1,7 @@
 {
   "name": "dsh-live-doc",
-  "version": "1.1.0",
-  "description": "Live co-editing for DeepSeek Harness: the agent writes, you edit the same document in a real-time panel, and the agent reads your edits before it writes again. Exports .docx with no Office installation.",
+  "version": "1.3.0",
+  "description": "Live co-editing for DeepSeek Harness: the agent writes, you edit the same document in a real-time panel, the agent reads your edits before it writes again. Tabs, split panes, an outline, images and tables, and .docx export with no Office installation.",
   "type": "module",
   "main": "./src/host/index.js",
   "exports": {

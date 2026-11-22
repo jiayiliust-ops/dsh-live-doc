@@ -63,9 +63,11 @@ test('the host half registers tools, a prompt section and the route', async (t) 
   assert.equal(tools.length, 8);
   assert.equal(sections.length, 1);
   assert.equal(sections[0].name, 'live-doc:coedit');
-  assert.equal(routes.length, 1);
+  assert.equal(routes.length, 2);
   assert.equal(routes[0].path, '/live-doc/api');
   assert.equal(routes[0].kind, 'prefix');
+  assert.equal(routes[1].path, '/live-doc/asset');
+  assert.equal(routes[1].kind, 'exact');
 
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const exec = { agent: {}, signal: undefined };

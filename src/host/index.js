@@ -15,10 +15,20 @@
  * @module dsh-live-doc
  */
 
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DocumentStore, blocksToMarkdown, htmlToText, safeFileName } from './store.js';
+import { DocumentStore, blockText, blocksToMarkdown, htmlToText, safeFileName } from './store.js';
+import {
+  MAX_IMAGE_BYTES,
+  assetName,
+  assetPath,
+  isAssetSrc,
+  isSafeAssetName,
+  mimeOf,
+  readAsset,
+  saveAsset,
+} from './assets.js';
 import { buildDocx } from './docx.js';
 import { defineTool } from './tool.js';
 
@@ -36,6 +46,43 @@ function storeDirectory() {
     ? process.env.DSH_HOME
     : path.join(os.homedir(), '.dsh');
   return path.join(home, 'live-doc');
+}
+
+/** Whether a Markdown image target is a remote URL we leave alone. */
+function isRemoteSrc(src) {
+  return /^(https?:)?\/\//i.test(String(src ?? ''));
+}
+
+/**
+ * Copy the images an agent referenced by local path into the document's asset
+ * folder, so the panel can show them and the DOCX export can embed them.
+ *
+ * Markdown is the agent's normal input, and the useful thing it can write is a
+ * workspace path (`![图](figures/f1.png)`) — a file it just generated. Files are
+ * copied, never linked: the document then survives the workspace being moved.
+ * @param store - the document store (for its directory).
+ * @param docId - owning document.
+ * @param blocks - parsed blocks about to be stored (mutated in place).
+ * @param cwd - session working directory for relative paths.
+ */
+function importLocalImages(store, docId, blocks, cwd) {
+  for (const block of blocks) {
+    if (block.type !== 'image') continue;
+    const src = String(block.src ?? '');
+    if (src.length === 0 || isAssetSrc(src) || isRemoteSrc(src)) continue;
+    const resolved = path.isAbsolute(src) ? src : path.resolve(cwd, src);
+    if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+      throw new Error(`找不到图片文件：${src}（按工作区解析为 ${resolved}）。请确认路径存在，或改用 http(s) 图片地址。`);
+    }
+    if (statSync(resolved).size > MAX_IMAGE_BYTES) {
+      throw new Error(`图片 ${src} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB，请先压缩。`);
+    }
+    const saved = saveAsset(store.directory, docId, readFileSync(resolved));
+    block.src = saved.src;
+    block.px = saved.px;
+    block.py = saved.py;
+    if (String(block.alt ?? '').length === 0) block.alt = path.basename(resolved);
+  }
 }
 
 /** Short block-id list for tool results. */
@@ -78,6 +125,8 @@ function promptSectionText() {
     '- 每次继续写之前先 `doc_read`：它会列出用户刚改过的段落（用户版本为准），先顺着用户的修改写；',
     '- 用户改过的段落（`by: "user"`）不要整段覆盖，除非用户明确要求重写；',
     '- 需要局部改时用 `doc_replace`（带 `expect` 防错位），插入用 `doc_insert`；',
+    '- 插图：`![说明](相对工作区的图片路径)` 单独占一行，会复制进文档并嵌入导出的 .docx（也接受 http(s) 地址，但远程图片不会打进 DOCX）；',
+    '- 表格：在 `doc_append` 里写标准 GFM 表格（`| 列 | 列 |` + `| --- | --- |`），面板里会显示成可编辑的真表格，导出时是 Word 表格；',
     '- 写完调用 `doc_export` 导出 .docx；导出后仍可继续在同一面板改，再导出会覆盖同一个文件。',
     '',
     '面板是实时的：工具一返回，用户就能看到新内容；用户改的字也会在下次工具调用时回到你这里。',
@@ -146,17 +195,22 @@ export function apply(ctx) {
 
     disposers.push(toolCtx.tools.register(defineTool({
       name: 'doc_append',
-      description: `向协作文档末尾追加内容。参数 markdown 支持 # / ## / ### 标题、- 列表、1. 编号、> 引用、\`\`\` 代码块和行内 **加粗** *斜体* \`代码\` [链接](url)；一行一个段落。${COEDIT_NOTE}`,
+      description: `向协作文档末尾追加内容。参数 markdown 支持 # / ## / ### 标题、- 列表、1. 编号、> 引用、\`\`\` 代码块、GFM 表格（| 列 | + | --- |）、单独一行的 ![说明](图片路径)（工作区相对路径会被复制进文档）和行内 **加粗** *斜体* \`代码\` [链接](url)；一行一个段落。${COEDIT_NOTE}`,
       parameters: {
         docId: { type: 'string', description: '文档 id；留空则用当前面板里的文档' },
-        markdown: { type: 'string', required: true, description: '要追加的 Markdown 文本（一行一段，可含标题/列表）' },
+        markdown: { type: 'string', required: true, description: '要追加的 Markdown 文本（一行一段，可含标题/列表/表格/图片）' },
       },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
-      async execute(args) {
+      async execute(args, exec) {
         const doc = store.require(args.docId);
+        const cwd = await cwdOf(exec);
         return whileBusy(doc.id, async () => {
           const before = doc.rev;
-          const { doc: next, added } = store.append(doc.id, String(args.markdown ?? ''));
+          const { doc: next, added } = store.append(
+            doc.id,
+            String(args.markdown ?? ''),
+            (parsed) => importLocalImages(store, doc.id, parsed, cwd),
+          );
           const edits = next.pending.filter((entry) => entry.seen !== true);
           const lines = [
             `已追加 ${added.length} 段到《${next.title}》：${idsOf(added)}`,
@@ -177,11 +231,17 @@ export function apply(ctx) {
         markdown: { type: 'string', required: true, description: '要插入的 Markdown 文本' },
       },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
-      async execute(args) {
+      async execute(args, exec) {
         const doc = store.require(args.docId);
+        const cwd = await cwdOf(exec);
         return whileBusy(doc.id, async () => {
           const after = String(args.after ?? '').trim() === 'end' ? undefined : String(args.after ?? '');
-          const { doc: next, added } = store.insertAfter(doc.id, after, String(args.markdown ?? ''));
+          const { doc: next, added } = store.insertAfter(
+            doc.id,
+            after,
+            String(args.markdown ?? ''),
+            (parsed) => importLocalImages(store, doc.id, parsed, cwd),
+          );
           return `已插入 ${added.length} 段（${idsOf(added)}）到《${next.title}》，revision ${next.rev}。`;
         });
       },
@@ -261,14 +321,7 @@ export function apply(ctx) {
         const target = raw.length > 0
           ? (path.isAbsolute(raw) ? raw : path.resolve(cwd, raw))
           : (doc.path ?? path.join(cwd, `${safeFileName(doc.title)}.docx`));
-        mkdirSync(path.dirname(target), { recursive: true });
-        const lower = target.toLowerCase();
-        if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
-          writeFileSync(target, blocksToMarkdown(doc.blocks), 'utf8');
-        } else {
-          writeFileSync(target, buildDocx({ title: doc.title, blocks: doc.blocks, createdAt: doc.createdAt }));
-        }
-        store.markExported(doc.id, target);
+        exportDocument(doc, target);
         return `已导出《${doc.title}》（revision ${doc.rev}，${doc.blocks.length} 段）到：${target}\n面板仍然打开，用户可以继续改，再次导出会覆盖该文件。`;
       },
     })));
@@ -315,13 +368,13 @@ export function apply(ctx) {
   // ---- Browser routes ----------------------------------------------------
 
   /** Read a bounded JSON body from a Node request. */
-  function readBody(req) {
+  function readBody(req, limit = 2_000_000) {
     return new Promise((resolve, reject) => {
       const chunks = [];
       let size = 0;
       req.on('data', (chunk) => {
         size += chunk.length;
-        if (size > 2_000_000) {
+        if (size > limit) {
           reject(new Error('请求体过大'));
           req.destroy();
           return;
@@ -368,12 +421,61 @@ export function apply(ctx) {
     return path.resolve(doc.cwd ?? defaultCwd(), raw);
   }
 
+  /** Image extension of a stored asset name. */
+  function assetExt(name) {
+    const ext = String(name ?? '').split('.').pop()?.toLowerCase() ?? '';
+    return ext === 'jpeg' ? 'jpg' : ext;
+  }
+
+  /**
+   * Hand the DOCX writer the bytes for one `asset:` source.
+   *
+   * Remote images and missing files resolve to `undefined`, and the exporter
+   * skips them: exporting a document must never make a network request.
+   */
+  function assetResolver(doc) {
+    return (src) => {
+      const name = assetName(src);
+      if (name.length === 0) return undefined;
+      const data = readAsset(store.directory, doc.id, name);
+      return data === undefined ? undefined : { data, ext: assetExt(name) };
+    };
+  }
+
+  /** Markdown with stored image links rewritten to absolute paths. */
+  function markdownForExport(doc) {
+    return blocksToMarkdown(doc.blocks).replace(
+      /\(asset:([a-z0-9]+\.[a-z]+)\)/gi,
+      (_match, name) => `(${assetPath(store.directory, doc.id, name)})`,
+    );
+  }
+
+  /** Write one document to disk as .docx or .md, and remember the destination. */
+  function exportDocument(doc, target) {
+    mkdirSync(path.dirname(target), { recursive: true });
+    const lower = target.toLowerCase();
+    if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
+      writeFileSync(target, markdownForExport(doc), 'utf8');
+    } else {
+      writeFileSync(target, buildDocx({
+        title: doc.title,
+        blocks: doc.blocks,
+        createdAt: doc.createdAt,
+        resolveAsset: assetResolver(doc),
+      }));
+    }
+    store.markExported(doc.id, target);
+    return target;
+  }
+
   /** One route method. */
   async function dispatch(method, body) {
     switch (method) {
       case 'state': {
         const docId = typeof body.docId === 'string' && body.docId.length > 0 ? body.docId : undefined;
-        return store.view(docId);
+        // A pane that names a document reads it without taking over the host's
+        // active document; the pane with no id follows whatever is active.
+        return store.view(docId, { select: docId === undefined });
       }
       case 'probe':
         return store.probe();
@@ -389,7 +491,12 @@ export function apply(ctx) {
         return store.view(String(body.docId ?? ''));
       }
       case 'patch': {
-        const result = store.patchFromUser(String(body.docId ?? ''), String(body.blockId ?? ''), String(body.html ?? ''), body.baseRev);
+        const value = body.rows !== undefined
+          ? { rows: body.rows }
+          : (body.alt !== undefined || body.width !== undefined
+            ? { alt: body.alt, width: body.width }
+            : { html: String(body.html ?? '') });
+        const result = store.patchFromUser(String(body.docId ?? ''), String(body.blockId ?? ''), value, body.baseRev);
         return {
           ok: true,
           changed: result.changed,
@@ -398,18 +505,42 @@ export function apply(ctx) {
           block: result.block,
         };
       }
+      case 'uploadImage': {
+        const doc = store.require(body.docId);
+        const match = /^data:image\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(String(body.dataUrl ?? ''));
+        if (match === null) throw new Error('图片数据不是 base64 data URL。');
+        const saved = saveAsset(store.directory, doc.id, Buffer.from(match[1], 'base64'));
+        const result = store.insertBlockAfter(doc.id, body.after, {
+          type: 'image',
+          src: saved.src,
+          alt: String(body.alt ?? ''),
+          px: saved.px,
+          py: saved.py,
+          width: 100,
+        }, 'user');
+        return { ok: true, rev: result.doc.rev, block: result.block };
+      }
       case 'retype': {
         const result = store.retype(String(body.docId ?? ''), String(body.blockId ?? ''), String(body.type ?? 'p'));
         return { ok: true, rev: result.doc.rev, block: result.block };
       }
       case 'insertBlock': {
         const doc = store.require(body.docId);
-        const result = store.insertBlockAfter(doc.id, body.after, { type: body.type, html: body.html }, 'user');
+        const result = store.insertBlockAfter(doc.id, body.after, {
+          type: body.type,
+          html: body.html,
+          rows: body.rows,
+          src: body.src,
+          alt: body.alt,
+          width: body.width,
+        }, 'user');
         return { ok: true, rev: result.doc.rev, block: result.block };
       }
       case 'insertAfter': {
         const doc = store.require(body.docId);
-        const added = store.insertAfter(doc.id, body.after, String(body.markdown ?? ''));
+        // `after: "end"` means append, exactly as the doc_insert tool documents.
+        const after = String(body.after ?? '').trim() === 'end' ? undefined : body.after;
+        const added = store.insertAfter(doc.id, after, String(body.markdown ?? ''));
         return { ok: true, rev: added.doc.rev, blocks: added.added };
       }
       case 'deleteBlock': {
@@ -424,14 +555,7 @@ export function apply(ctx) {
       case 'export': {
         const doc = store.require(body.docId);
         const target = resolveExport(doc, body.file);
-        mkdirSync(path.dirname(target), { recursive: true });
-        const lower = target.toLowerCase();
-        if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
-          writeFileSync(target, blocksToMarkdown(doc.blocks), 'utf8');
-        } else {
-          writeFileSync(target, buildDocx({ title: doc.title, blocks: doc.blocks, createdAt: doc.createdAt }));
-        }
-        store.markExported(doc.id, target);
+        exportDocument(doc, target);
         const stat = existsSync(target) ? statSync(target) : undefined;
         return { ok: true, path: target, bytes: stat?.size ?? 0, rev: doc.rev };
       }
@@ -462,7 +586,10 @@ export function apply(ctx) {
           }
           const url = new URL(req.url ?? '/', 'http://localhost');
           const method = url.pathname.slice('/live-doc/api/'.length).replace(/\/+$/, '');
-          const body = await readBody(req);
+          // Only an image upload needs a large body; everything else stays small
+          // so a malformed request cannot make the host buffer megabytes.
+          const limit = method === 'uploadImage' ? 16 * 1024 * 1024 : 2_000_000;
+          const body = await readBody(req, limit);
           const result = await dispatch(method, body);
           send(res, 200, result);
         } catch (error) {
@@ -470,5 +597,42 @@ export function apply(ctx) {
         }
       },
     }), 'live-doc: routes');
+
+    // Images are served over GET because `<img src>` cannot send the panel's
+    // POST header. The route only ever reads inside one document's asset folder
+    // (strict name shape + a document id that must already exist), and refuses
+    // cross-site subresource loads, so it cannot become a general file reader.
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: '/live-doc/asset',
+      handler: (req, res) => {
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const docId = String(url.searchParams.get('doc') ?? '');
+        const name = String(url.searchParams.get('name') ?? '');
+        const site = req.headers['sec-fetch-site'];
+        if (typeof site === 'string' && site.length > 0 && site !== 'same-origin' && site !== 'none') {
+          res.statusCode = 403;
+          res.end();
+          return;
+        }
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(docId) || !isSafeAssetName(name)) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        const data = readAsset(store.directory, docId, name);
+        if (data === undefined) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        res.writeHead(200, {
+          'content-type': mimeOf(name),
+          'content-length': data.length,
+          'cache-control': 'private, max-age=31536000, immutable',
+        });
+        res.end(req.method === 'HEAD' ? undefined : data);
+      },
+    }), 'live-doc: asset route');
   });
 }

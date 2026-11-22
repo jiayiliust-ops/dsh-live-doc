@@ -160,3 +160,12 @@ test('documents survive a store reload', (t) => {
   assert.match(reloaded.markdown, /重启后还在/);
   assert.equal(second.view(doc.id).activeId, doc.id);
 });
+
+test('creating a document without a file leaves the export path unset', (t) => {
+  const { store, dir } = fixture(t);
+  const doc = store.create({ title: '无路径', cwd: dir });
+  assert.equal(doc.path, undefined);
+  assert.equal(store.read(doc.id).doc.path, undefined);
+  const fromPanel = store.create({ title: '面板新建' });
+  assert.equal(fromPanel.path, undefined);
+});

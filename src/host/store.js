@@ -24,7 +24,14 @@ import {
 import path from 'node:path';
 
 /** Block kinds the editor and the DOCX writer understand. */
-export const BLOCK_TYPES = new Set(['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'quote', 'code', 'hr']);
+export const BLOCK_TYPES = new Set(['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'quote', 'code', 'hr', 'image', 'table']);
+
+/** Widest a table may get before the panel stops trusting the agent. */
+const MAX_TABLE_COLUMNS = 12;
+/** Tallest a table may get. */
+const MAX_TABLE_ROWS = 400;
+/** Longest inline HTML allowed in one table cell. */
+const MAX_CELL_CHARS = 2_000;
 
 /** Longest text a single block may hold. */
 const MAX_BLOCK_CHARS = 40_000;
@@ -133,10 +140,76 @@ export function htmlToText(html) {
   return decodeEntities(String(html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).trim();
 }
 
+/** Clamp a number into a range. */
+function clamp(value, min, max) {
+  return Math.min(Math.max(Number(value), min), max);
+}
+
+/**
+ * Normalize a table into a rectangular grid of inline HTML.
+ *
+ * Storage is deliberately rectangular: the panel and the DOCX writer both need
+ * every row to have the same number of cells, and a ragged GFM table would
+ * otherwise produce a broken `<w:tbl>`.
+ * @param rows - candidate rows from the agent, the panel, or a stored document.
+ * @returns rows of sanitized cell HTML, or an empty array when unusable.
+ */
+export function normalizeRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const grid = rows
+    .slice(0, MAX_TABLE_ROWS)
+    .filter((row) => Array.isArray(row))
+    .map((row) => row
+      .slice(0, MAX_TABLE_COLUMNS)
+      .map((cell) => sanitizeHtml(String(cell ?? '').slice(0, MAX_CELL_CHARS))));
+  if (grid.length === 0) return [];
+  const columns = Math.max(1, ...grid.map((row) => row.length));
+  return grid.map((row) => {
+    const padded = row.slice();
+    while (padded.length < columns) padded.push('');
+    return padded;
+  });
+}
+
+/** Split one GFM table row into trimmed cell texts. */
+function splitTableRow(line) {
+  let text = String(line ?? '').trim();
+  if (text.startsWith('|')) text = text.slice(1);
+  if (text.endsWith('|')) text = text.slice(0, -1);
+  return text.split('|').map((cell) => cell.replace(/\\\|/g, '|').trim());
+}
+
+/** Whether a line is the `| --- | --- |` divider under a GFM table header. */
+function isTableSeparator(line) {
+  if (typeof line !== 'string') return false;
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return false;
+  if (!/^\|?[\s:|-]+\|?$/.test(trimmed)) return false;
+  if (!trimmed.includes('-')) return false;
+  return trimmed.startsWith('|') || trimmed.endsWith('|');
+}
+
+/** Render a table block as a GFM table. */
+export function tableToMarkdown(rows) {
+  const grid = normalizeRows(rows);
+  if (grid.length === 0) return '';
+  const escapeCell = (cell) => htmlToMd(cell).replace(/\n+/g, ' ').replace(/\|/g, '\\|');
+  const line = (cells) => `| ${cells.map(escapeCell).join(' | ')} |`;
+  const divider = `| ${grid[0].map(() => '---').join(' | ')} |`;
+  return [line(grid[0]), divider, ...grid.slice(1).map(line)].join('\n');
+}
+
+/** Alt text of an image block, safe for Markdown. */
+export function imageAlt(block) {
+  return String(block?.alt ?? '').replace(/[[\]\n]/g, ' ').slice(0, 200);
+}
+
 /** Render one block as a Markdown line. */
 export function blockToMarkdown(block) {
   const text = htmlToMd(block.html);
   switch (block.type) {
+    case 'image': return `![${imageAlt(block)}](${String(block.src ?? '')})`;
+    case 'table': return tableToMarkdown(block.rows);
     case 'h1': return `# ${text}`;
     case 'h2': return `## ${text}`;
     case 'h3': return `### ${text}`;
@@ -178,8 +251,8 @@ export function markdownToBlocks(markdown) {
   const lines = source.split('\n');
   const blocks = [];
   let fence = null;
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, '');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\s+$/, '');
     if (fence !== null) {
       if (/^```/.test(line.trim())) {
         blocks.push({ type: 'code', html: mdToHtml(fence.join('\n')) });
@@ -202,6 +275,29 @@ export function markdownToBlocks(markdown) {
     if (heading !== null) {
       const level = Math.min(heading[1].length, 3);
       blocks.push({ type: `h${level}`, html: mdToHtml(heading[2]) });
+      continue;
+    }
+    // A standalone image line becomes an image block; the host later imports a
+    // workspace path into the document's asset folder.
+    const image = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(line.trim());
+    if (image !== null) {
+      blocks.push({ type: 'image', html: '', src: image[2], alt: image[1] });
+      continue;
+    }
+    // GFM table: a header row, the divider, then body rows until the table ends.
+    if (/^\s*\|.*\|\s*$/.test(line) && isTableSeparator(lines[index + 1])) {
+      const rows = [splitTableRow(line)];
+      let cursor = index + 2;
+      while (cursor < lines.length && /^\s*\|/.test(lines[cursor])) {
+        rows.push(splitTableRow(lines[cursor]));
+        cursor += 1;
+      }
+      blocks.push({
+        type: 'table',
+        html: '',
+        rows: rows.map((cells) => cells.map((cell) => mdToHtml(cell))),
+      });
+      index = cursor - 1;
       continue;
     }
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
@@ -244,10 +340,19 @@ export function safeFileName(title) {
   return cleaned.length > 0 ? cleaned.slice(0, 80) : '协作文档';
 }
 
+/** Plain text of one block, including table cells, for counts and previews. */
+export function blockText(block) {
+  if (block?.type === 'table') {
+    return (block.rows ?? []).map((row) => row.map((cell) => htmlToText(cell)).join(' ')).join(' ');
+  }
+  if (block?.type === 'image') return imageAlt(block);
+  return htmlToText(block?.html);
+}
+
 /** Short preview text for the document list. */
 function previewOf(blocks) {
   for (const block of blocks) {
-    const text = htmlToText(block.html);
+    const text = blockText(block);
     if (text.length > 0) return text.slice(0, 60);
   }
   return '';
@@ -336,9 +441,12 @@ export class DocumentStore {
     const now = Date.now();
     const id = newId('doc');
     const resolvedTitle = String(title ?? '').trim() || '未命名文档';
-    const base = cwd !== undefined && path.isAbsolute(String(file ?? '')) === false
-      ? path.resolve(cwd, String(file))
-      : String(file ?? '');
+    // An absent `file` must stay absent: `String(undefined)` would otherwise
+    // become "<cwd>/undefined" and ship a docx with no extension on export.
+    const rawFile = String(file ?? '').trim();
+    const base = rawFile.length === 0
+      ? ''
+      : (path.isAbsolute(rawFile) ? rawFile : path.resolve(cwd ?? process.cwd(), rawFile));
     const doc = {
       id,
       title: resolvedTitle.slice(0, 120),
@@ -378,25 +486,51 @@ export class DocumentStore {
     return this.busy.has(docId);
   }
 
-  /** Append one block and return it. */
-  #push(doc, block) {
+  /**
+   * Build one stored block from a parsed or panel-supplied shape.
+   *
+   * Text blocks keep inline HTML in `html`; image blocks carry `src`/`alt`/
+   * intrinsic size plus a display width percent; table blocks carry a
+   * rectangular `rows` grid of inline HTML cells.
+   */
+  #item(doc, block, by) {
+    const type = normalizeType(block.type);
     const item = {
       id: newId('b'),
-      type: normalizeType(block.type),
-      html: sanitizeHtml(block.html ?? ''),
+      type,
+      html: type === 'image' || type === 'table' ? '' : sanitizeHtml(block.html ?? ''),
       rev: doc.rev + 1,
-      by: 'ai',
+      by,
       ts: Date.now(),
     };
+    if (type === 'image') {
+      item.src = String(block.src ?? '').slice(0, 4_000);
+      item.alt = String(block.alt ?? '').slice(0, 200);
+      item.width = Number.isFinite(block.width) ? clamp(block.width, 15, 100) : 100;
+      if (Number.isFinite(block.px) && block.px > 0) item.px = Math.round(block.px);
+      if (Number.isFinite(block.py) && block.py > 0) item.py = Math.round(block.py);
+    }
+    if (type === 'table') item.rows = normalizeRows(block.rows);
+    return item;
+  }
+
+  /** Append one block and return it. */
+  #push(doc, block) {
+    const item = this.#item(doc, block, 'ai');
     doc.blocks.push(item);
     return item;
   }
 
-  /** Append parsed blocks to a document. */
-  append(docId, markdown) {
+  /**
+   * Append parsed blocks to a document.
+   * @param prepare - optional hook that may rewrite parsed blocks (the host uses
+   *   it to copy locally-referenced images into the document's asset folder).
+   */
+  append(docId, markdown, prepare) {
     const doc = this.require(docId);
     const parsed = markdownToBlocks(markdown);
     if (parsed.length === 0) throw new Error('markdown 为空，没有写入任何内容。');
+    if (typeof prepare === 'function') prepare(parsed, doc);
     const added = parsed.map((block) => this.#push(doc, block));
     doc.rev += 1;
     doc.updatedAt = Date.now();
@@ -405,25 +539,16 @@ export class DocumentStore {
   }
 
   /** Insert parsed blocks after a block id (or at the end). */
-  insertAfter(docId, afterId, markdown) {
+  insertAfter(docId, afterId, markdown, prepare) {
     const doc = this.require(docId);
     const parsed = markdownToBlocks(markdown);
     if (parsed.length === 0) throw new Error('markdown 为空，没有写入任何内容。');
+    if (typeof prepare === 'function') prepare(parsed, doc);
     const index = afterId === undefined || afterId === '' || afterId === null
       ? doc.blocks.length
       : doc.blocks.findIndex((block) => block.id === afterId);
     if (index < 0) throw new Error(`找不到块 ${afterId}，请先 doc_read 查看当前块 id。`);
-    const added = parsed.map((block) => {
-      const item = {
-        id: newId('b'),
-        type: normalizeType(block.type),
-        html: sanitizeHtml(block.html ?? ''),
-        rev: doc.rev + 1,
-        by: 'ai',
-        ts: Date.now(),
-      };
-      return item;
-    });
+    const added = parsed.map((block) => this.#item(doc, block, 'ai'));
     doc.blocks.splice(index + 1, 0, ...added);
     doc.rev += 1;
     doc.updatedAt = Date.now();
@@ -435,20 +560,13 @@ export class DocumentStore {
    * Insert one raw block after a block id (or at the end). Used by the panel's
    * Enter key and "+ paragraph" control, where there is no Markdown to parse.
    */
-  insertBlockAfter(docId, afterId, { type, html } = {}, by = 'user') {
+  insertBlockAfter(docId, afterId, { type, html, rows, src, alt, width, px, py } = {}, by = 'user') {
     const doc = this.require(docId);
     const index = afterId === undefined || afterId === null || afterId === ''
       ? doc.blocks.length
       : doc.blocks.findIndex((block) => block.id === afterId);
     if (index < 0) throw new Error(`找不到块 ${afterId}。`);
-    const block = {
-      id: newId('b'),
-      type: normalizeType(type),
-      html: sanitizeHtml(html ?? ''),
-      rev: doc.rev + 1,
-      by,
-      ts: Date.now(),
-    };
+    const block = this.#item(doc, { type, html, rows, src, alt, width, px, py }, by);
     doc.blocks.splice(index + 1, 0, block);
     doc.rev += 1;
     doc.updatedAt = Date.now();
@@ -462,16 +580,31 @@ export class DocumentStore {
     const block = doc.blocks.find((entry) => entry.id === blockId);
     if (block === undefined) throw new Error(`找不到块 ${blockId}，请先 doc_read 查看当前块 id。`);
     if (expect !== undefined && expect !== null && expect !== '') {
-      const current = htmlToText(block.html);
+      const current = blockText(block);
       if (!current.includes(String(expect))) {
         throw new Error(`块 ${blockId} 当前内容是「${current.slice(0, 40)}」，与 expect「${String(expect).slice(0, 40)}」不一致；请重新 doc_read 后再改。`);
       }
     }
     const text = String(markdown ?? '').trim();
-    if (block.type === 'hr') {
-      block.type = 'p';
+    const parsed = markdownToBlocks(text);
+    const sameShape = parsed.length === 1 && parsed[0].type === block.type
+      && (block.type === 'table' || block.type === 'image');
+    if (sameShape) {
+      // Rewriting a table with a new GFM table (or an image with a new image)
+      // keeps the block id, so the panel's local state and the agent's ids stay
+      // valid across the rewrite.
+      if (block.type === 'table') block.rows = normalizeRows(parsed[0].rows);
+      else {
+        block.src = String(parsed[0].src ?? '');
+        block.alt = String(parsed[0].alt ?? '');
+      }
+    } else {
+      if (block.type === 'hr' || block.type === 'table' || block.type === 'image') block.type = 'p';
+      block.html = sanitizeHtml(mdToHtml(text));
+      delete block.rows;
+      delete block.src;
+      delete block.alt;
     }
-    block.html = sanitizeHtml(mdToHtml(text));
     block.rev = doc.rev + 1;
     block.by = 'ai';
     block.ts = Date.now();
@@ -487,7 +620,11 @@ export class DocumentStore {
     const doc = this.require(docId);
     const block = doc.blocks.find((entry) => entry.id === blockId);
     if (block === undefined) throw new Error(`找不到块 ${blockId}。`);
-    block.type = normalizeType(type);
+    const next = normalizeType(type);
+    if (next === 'image' || next === 'table') {
+      throw new Error('图片和表格用「＋ 图片 / ＋ 表格」插入，不能把文字段直接转成图片或表格。');
+    }
+    block.type = next;
     block.rev = doc.rev + 1;
     block.by = 'user';
     doc.rev += 1;
@@ -527,15 +664,35 @@ export class DocumentStore {
    * flagged as a conflict so the next `doc_read` can warn the model.
    * @returns the updated block, the document revision, and whether it conflicted.
    */
-  patchFromUser(docId, blockId, html, baseRev) {
+  patchFromUser(docId, blockId, value, baseRev) {
     const doc = this.require(docId);
     const block = doc.blocks.find((entry) => entry.id === blockId);
     if (block === undefined) throw new Error(`找不到块 ${blockId}，可能已被删除。`);
-    const before = block.html;
-    const next = sanitizeHtml(html);
-    if (next === before) return { doc, block, conflict: false, changed: false };
-    const conflict = typeof baseRev === 'number' && baseRev !== block.rev && block.by === 'ai';
-    block.html = next;
+    const object = value !== null && typeof value === 'object';
+    const before = object ? blockToMarkdown(block) : block.html;
+    const conflictNow = () => typeof baseRev === 'number' && baseRev !== block.rev && block.by === 'ai';
+    let changed = false;
+    let conflict = false;
+    if (object && Array.isArray(value.rows)) {
+      const nextRows = normalizeRows(value.rows);
+      changed = JSON.stringify(nextRows) !== JSON.stringify(block.rows ?? []);
+      conflict = changed && conflictNow();
+      block.rows = nextRows;
+    } else if (object && (value.alt !== undefined || value.width !== undefined)) {
+      const alt = String(value.alt ?? block.alt ?? '').slice(0, 200);
+      const width = Number.isFinite(value.width) ? clamp(value.width, 15, 100) : (block.width ?? 100);
+      changed = alt !== (block.alt ?? '') || width !== (block.width ?? 100);
+      conflict = changed && conflictNow();
+      block.alt = alt;
+      block.width = width;
+    } else {
+      const next = sanitizeHtml(object ? value.html : value);
+      changed = next !== block.html;
+      conflict = changed && conflictNow();
+      block.html = next;
+    }
+    if (!changed) return { doc, block, conflict: false, changed: false };
+    const after = object ? blockToMarkdown(block) : block.html;
     block.rev = doc.rev + 1;
     block.by = 'user';
     block.ts = Date.now();
@@ -543,8 +700,8 @@ export class DocumentStore {
     doc.updatedAt = Date.now();
     doc.pending.push({
       blockId,
-      before: before.slice(0, 8_000),
-      after: next.slice(0, 8_000),
+      before: String(before).slice(0, 8_000),
+      after: String(after).slice(0, 8_000),
       at: Date.now(),
       conflict,
     });
@@ -586,13 +743,26 @@ export class DocumentStore {
       doc,
       markdown,
       edits,
-      wordCount: doc.blocks.reduce((total, block) => total + htmlToText(block.html).length, 0),
+      wordCount: doc.blocks.reduce((total, block) => total + blockText(block).length, 0),
     };
   }
 
-  /** Full state for the browser panel. */
-  view(docId) {
-    const doc = docId !== undefined ? this.require(docId) : this.active();
+  /**
+   * Full state for the browser panel.
+   *
+   * `select: false` reads a document WITHOUT making it the host's active one —
+   * a second split pane must not steal the active document from the pane the
+   * user is actually typing in (and from the agent tools that default to it).
+   */
+  view(docId, { select = true } = {}) {
+    let doc;
+    if (docId !== undefined && docId !== null) {
+      const key = String(docId);
+      doc = select ? this.require(key) : this.docs.get(key);
+      if (doc === undefined) throw new Error(`文档不存在：${docId}`);
+    } else {
+      doc = this.active();
+    }
     if (doc === undefined) {
       return { doc: null, activeId: null, docs: this.list(), busy: false };
     }
@@ -607,7 +777,7 @@ export class DocumentStore {
         exportedAt: doc.exportedAt,
         pendingEdits: doc.pending.filter((entry) => entry.seen !== true).length,
       },
-      activeId: doc.id,
+      activeId: this.activeId ?? doc.id,
       docs: this.list(),
       busy: this.isBusy(doc.id),
     };

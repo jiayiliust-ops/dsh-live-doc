@@ -21,6 +21,7 @@ Long documents are painful to generate in one shot: the model writes 5,000 words
 
 ## Features
 
+- **A free-floating sidebar** — drag the header to move the panel, resize it from any edge or corner, and it snaps flush to a screen edge (snap it right and it reads as a right sidebar). Maximize/restore, remembered geometry per browser, double-click the header to reset.
 - **Left sidebar workspace** — a global **Live document** row in the left sidebar opens a full-page document workspace at any time, even without a chat session. The floating panel and header button remain for editing beside the conversation.
 - **Block-level co-editing** — headings 1–3, paragraphs, bullet and numbered lists, quotes, code, dividers; bold / italic / underline; Enter creates the next paragraph, Backspace on an empty one deletes it.
 - **One shared document** — agent tools and the browser panel read and write the same block list; the browser saves with a per-block base revision, so an agent write and your edit never silently overwrite each other.
@@ -124,7 +125,9 @@ The exporter builds the whole package itself (`[Content_Types].xml`, relationshi
 
 ## Limitations
 
-- Text blocks only. Tables, images, footnotes, page numbers, headers/footers, and pagination are not modeled; use Word or DSH's Office tools for those.
+- Text, images and tables are modeled. Footnotes, page numbers, headers/footers, a table of contents field, pagination and fine typography are not; finish those in Word.
+- Images are copies: deleting a block does not immediately delete the file under `assets/<docId>/`, so the cache needs a manual clean-up once in a while.
+- Remote images render only; they are never downloaded, so they do not appear in the exported .docx.
 - Existing `.docx` files are not imported. The plugin owns documents it creates.
 - The panel follows the profile's active document; several sessions editing different documents at once share one active id.
 - DOCX export uses conservative defaults; fine layout still belongs in Word.
