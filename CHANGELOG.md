@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The plugin glyph no longer inflates the header.** `DocumentIcon` was written
+  to take a pixel number but three call sites rendered it as a component
+  (`h(DocumentIcon, { size })`), so `width`/`height` received a props object, the
+  `<svg>` lost its intrinsic size and stretched to fill its flex row: the panel
+  header grew to several hundred pixels, with a giant icon where a 15 px glyph
+  belongs. It now takes props with a default, every call site matches, and the
+  header is back to a single 46 px row (42 px in the empty state, 18 px in the
+  sidebar row).
+
+### Changed
+
+- **The panel's own title row is gone while a document is open.** Its buttons
+  (新建 / 分栏 / 紧凑, and the document picker when the tab strip is collapsed)
+  moved into the document title row, which doubles as the drag handle for the
+  floating panel — drag it to move, double-click to reset — and the window
+  controls (maximize, close) sit at the end of that row. The title row only
+  appears for the empty panel and for split view, where one pane is too narrow
+  to carry the panel controls. The panel now starts with the document title, so
+  the top of the panel is one row shorter.
+- **Collapsing is row-based; widths are proportional.** No region remembers a
+  pixel height any more, so a reflow can no longer leave a scrolling band, a
+  half-cut row or a blank gap behind:
+  - the tab strip disappears as a whole — a single open document never shows
+    one, and a collapsed strip swaps in a document picker in the header;
+  - the formatting toolbar folds as a whole, from the pane's title row or from
+    its grip;
+  - the document takes exactly the height a hidden row freed.
+- **The outline and the page are kept as percentages** of the space around
+  them: the outline is `clamp(120px, 18%, 340px)` of the body, the page is
+  `clamp(420px, 95%, 1400px)` of what is left beside the outline. Hiding the
+  outline gives its share back to the page, and resizing the window or the
+  floating panel re-divides both instead of keeping old pixels. Both dividers
+  still adjust them, and the values are stored in `dsh.liveDoc.layout`.
+- Every grip also answers a plain click, and a **Compact** button collapses the
+  tab strip and the toolbar together. A first-run hint names the regions.
+
 ## [1.3.0] — 2026-11-18
 
 ### Changed

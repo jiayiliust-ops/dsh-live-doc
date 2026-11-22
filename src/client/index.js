@@ -56,6 +56,18 @@ window.__ModuleLoader__.load({
       maximize: '放大',
       restore: '还原大小',
       dragHint: '拖动这里移动；双击复位；边缘和角可缩放',
+      gripChrome: '上拖或点击收起标签栏，下拖展开；双击总是展开',
+      gripPane: '上拖或点击收起工具栏，下拖展开；双击总是展开',
+      gripOutline: '拖动调整目录宽度，按比例随窗口自适应；双击还原',
+      gripPage: '拖动调整正文页宽度，按比例随窗口自适应；双击还原',
+      gripSplit: '拖动调整左右分栏比例；双击还原',
+      foldTools: '收起格式工具栏',
+      unfoldTools: '展开格式工具栏',
+      tools: '工具栏',
+      layoutHint: '标签栏、工具栏可收起；目录与正文宽度按比例自适应，拖动分隔条即可调整',
+      compact: '紧凑',
+      compactOn: '收起顶部：标签栏和工具栏一起收起',
+      compactOff: '展开顶部',
       h1: '标题 1', h2: '标题 2', h3: '标题 3', p: '正文',
       ul: '项目符号', ol: '编号', quote: '引用', code: '代码', hr: '分隔线',
     };
@@ -96,6 +108,18 @@ window.__ModuleLoader__.load({
       maximize: 'Maximize',
       restore: 'Restore size',
       dragHint: 'Drag here to move; double-click to reset; edges and corners resize',
+      gripChrome: 'Drag up or click to hide the tab strip; drag down to show it again',
+      gripPane: 'Drag up or click to hide the toolbar; drag down to show it again',
+      gripOutline: 'Drag to set the outline width — a share of the body, so it scales with the window',
+      gripPage: 'Drag to set the page width — a share of the space beside the outline',
+      gripSplit: 'Drag to set the split ratio; double-click to restore',
+      foldTools: 'Hide the formatting toolbar',
+      unfoldTools: 'Show the formatting toolbar',
+      tools: 'Tools',
+      layoutHint: 'Hide the tab strip or the toolbar from the grips; the outline and the page keep proportions as the window changes',
+      compact: 'Compact',
+      compactOn: 'Collapse the tab strip and the toolbar together',
+      compactOff: 'Expand the header',
       h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', p: 'Body',
       ul: 'Bulleted list', ol: 'Numbered list', quote: 'Quote', code: 'Code', hr: 'Divider',
     };
@@ -115,6 +139,178 @@ window.__ModuleLoader__.load({
         return () => openState.listeners.delete(setValue);
       }, []);
       return [value, setOpenState];
+    }
+
+    // ---- panel layout store ----------------------------------------------
+    //
+    // Two kinds of size live here, and neither is a pixel height that can go
+    // stale when the content reflows:
+    //
+    //   * the header stack collapses **by row** (`tabsHidden`, `folded`), so the
+    //     document immediately takes the space the hidden row used to occupy and
+    //     nothing is ever left half-cut or blank;
+    //   * the outline and the page keep **percentages**, so hiding the outline,
+    //     resizing the window or moving the split divider re-divides the width
+    //     proportionally instead of leaving yesterday's pixels behind.
+    //
+    // One store and one localStorage row, so both split panes agree.
+    const LAYOUT_KEY = 'dsh.liveDoc.layout';
+    const LAYOUT_DEFAULT = {
+      tabsHidden: false,   // tab strip collapsed to a document picker
+      folded: false,       // formatting toolbar hidden
+      outlinePct: 18,      // outline width as a share of the body
+      pagePct: 95,         // page width as a share of the space beside it
+      splitPct: 50,        // left pane share in split view
+    };
+    const LAYOUT_LIMITS = {
+      outlineMinPct: 10,
+      outlineMaxPct: 40,
+      pageMinPct: 35,
+      pageMaxPct: 100,
+      splitMin: 22,
+      splitMax: 78,
+    };
+
+    /** A number inside a range, rounded to 0.1, or the fallback when unusable. */
+    function layoutNumber(value, fallback, min, max) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) return fallback;
+      return Math.min(Math.max(Math.round(number * 10) / 10, min), max);
+    }
+
+    function readLayout() {
+      const fallback = { ...LAYOUT_DEFAULT };
+      let parsed = null;
+      try {
+        parsed = JSON.parse(window.localStorage.getItem(LAYOUT_KEY) ?? 'null');
+      } catch {
+        return fallback;
+      }
+      if (parsed === null || typeof parsed !== 'object') return fallback;
+      return {
+        tabsHidden: parsed.tabsHidden === true,
+        folded: parsed.folded === true,
+        outlinePct: layoutNumber(parsed.outlinePct, LAYOUT_DEFAULT.outlinePct, LAYOUT_LIMITS.outlineMinPct, LAYOUT_LIMITS.outlineMaxPct),
+        pagePct: layoutNumber(parsed.pagePct, LAYOUT_DEFAULT.pagePct, LAYOUT_LIMITS.pageMinPct, LAYOUT_LIMITS.pageMaxPct),
+        splitPct: layoutNumber(parsed.splitPct, LAYOUT_DEFAULT.splitPct, LAYOUT_LIMITS.splitMin, LAYOUT_LIMITS.splitMax),
+      };
+    }
+
+    const layoutState = { value: readLayout(), listeners: new Set(), timer: null };
+
+    /** Merge one size change and let every panel region re-render. */
+    function writeLayout(patch) {
+      layoutState.value = { ...layoutState.value, ...patch };
+      for (const listener of layoutState.listeners) listener(layoutState.value);
+      if (layoutState.timer !== null) clearTimeout(layoutState.timer);
+      layoutState.timer = setTimeout(() => {
+        layoutState.timer = null;
+        try {
+          window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutState.value));
+        } catch {
+          // Private mode; the sizes simply do not survive a reload.
+        }
+      }, 250);
+    }
+
+    function useLayout() {
+      const [value, setValue] = useState(layoutState.value);
+      useEffect(() => {
+        layoutState.listeners.add(setValue);
+        setValue(layoutState.value);
+        return () => layoutState.listeners.delete(setValue);
+      }, []);
+      return value;
+    }
+
+    /**
+     * Follow a pointer drag, coalescing to one update per animation frame so a
+     * long document is not re-rendered on every pointer event.
+     */
+    function trackPointer(event, compute, onEnd) {
+      if (typeof event.button === 'number' && event.button !== 0) return;
+      let frame = null;
+      let pending = null;
+      // Keep the double-click reset working: preventing the pointerdown default
+      // would suppress the compatibility click/dblclick. Suppress text selection
+      // for the duration of the drag instead.
+      const keepSelection = (selectionEvent) => selectionEvent.preventDefault();
+      const flush = () => {
+        frame = null;
+        if (pending === null) return;
+        const point = pending;
+        pending = null;
+        compute(point.x, point.y);
+      };
+      const move = (moveEvent) => {
+        // A release outside the window can arrive without a pointerup.
+        if (moveEvent.buttons === 0) {
+          up();
+          return;
+        }
+        pending = { x: moveEvent.clientX, y: moveEvent.clientY };
+        if (frame === null) frame = requestAnimationFrame(flush);
+      };
+      let finished = false;
+      const up = () => {
+        if (finished) return;
+        finished = true;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        window.removeEventListener('blur', up);
+        document.removeEventListener('selectstart', keepSelection);
+        if (frame !== null) {
+          cancelAnimationFrame(frame);
+          frame = null;
+        }
+        if (pending !== null) {
+          const point = pending;
+          pending = null;
+          compute(point.x, point.y);
+        }
+        if (typeof onEnd === 'function') onEnd();
+      };
+      document.addEventListener('selectstart', keepSelection);
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+      window.addEventListener('blur', up);
+    }
+
+    /** Drag on one axis: move the value by `delta * scale`, clamped. */
+    function beginResize(event, { axis, start, min, max, scale = 1, apply }) {
+      const origin = axis === 'x' ? event.clientX : event.clientY;
+      trackPointer(event, (clientX, clientY) => {
+        const delta = (axis === 'x' ? clientX : clientY) - origin;
+        const value = Math.round(Math.min(Math.max(start + delta * scale, min), max) * 10) / 10;
+        apply(value);
+      });
+    }
+
+    /**
+     * A grip that flips one region between shown and collapsed — drag it in the
+     * collapsing direction, or just click it. Because the region is hidden as a
+     * row instead of being squeezed to a pixel height, the document always takes
+     * exactly the freed space and nothing is left half-cut.
+     */
+    function beginCollapse(event, { collapsed, onToggle }) {
+      const originY = event.clientY;
+      let moved = false;
+      let done = false;
+      trackPointer(event, (clientX, clientY) => {
+        if (done) return;
+        const dy = clientY - originY;
+        if (Math.abs(dy) < 14) return;
+        moved = true;
+        done = true;
+        const collapse = dy < 0;
+        if (collapse !== collapsed) onToggle(collapse);
+      }, () => {
+        if (done) return;
+        done = true;
+        if (!moved) onToggle(!collapsed);
+      });
     }
 
     // ---- api -------------------------------------------------------------
@@ -175,7 +371,7 @@ window.__ModuleLoader__.load({
       return (Array.isArray(rows) ? rows : []).map((row) => (Array.isArray(row) ? row.slice() : []));
     }
 
-    function DocumentIcon(size) {
+    function DocumentIcon({ size = 16 } = {}) {
       return h('svg', { viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' },
         h('path', { d: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z' }),
         h('path', { d: 'M14 3v5h5' }),
@@ -191,7 +387,7 @@ window.__ModuleLoader__.load({
 .ld-layer{position:fixed;inset:0;z-index:80;pointer-events:none}
 .ld-layer.is-embedded{position:static;inset:auto;z-index:auto;pointer-events:auto;height:100%;min-height:0;display:flex}
 .ld-layer.is-embedded .ld-panel{position:static;width:auto!important;min-width:0;max-width:none;height:100%;max-height:none;flex:1;border:0;border-radius:0;box-shadow:none}
-.ld-main{height:100%;min-height:calc(100vh - 120px);display:flex;background:var(--dsw-alias-bg-base)}
+.ld-main{height:100%;min-height:0;display:flex;background:var(--dsw-alias-bg-base)}
 .ld-panel{pointer-events:auto;position:absolute;display:flex;flex-direction:column;min-width:360px;min-height:280px;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.32);overflow:hidden;color:var(--dsw-alias-label-primary);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
 .ld-panel.is-maximized{border-radius:10px}
 .ld-head{cursor:move;touch-action:none}
@@ -204,9 +400,26 @@ window.__ModuleLoader__.load({
 .ld-resize-nw{left:-4px;top:-4px;width:16px;height:16px;cursor:nwse-resize}
 .ld-resize-se{right:-4px;bottom:-4px;width:16px;height:16px;cursor:nwse-resize}
 .ld-resize-sw{left:-4px;bottom:-4px;width:16px;height:16px;cursor:nesw-resize}
-.ld-head{display:flex;align-items:center;gap:12px;padding:10px 14px 8px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
-.ld-brand{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;white-space:nowrap}
-.ld-head-actions{display:flex;align-items:center;gap:6px;margin-left:auto}
+.ld-chrome{flex:none;display:flex;flex-direction:column;min-height:0;position:relative}
+.ld-grip{flex:none;height:6px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none;background:transparent;position:relative;z-index:5}
+.ld-grip::before{content:"";position:absolute;inset:-3px 0}
+.ld-grip::after{content:"";width:36px;height:3px;border-radius:3px;background:var(--dsw-alias-border-l2);opacity:.55;transition:opacity .15s ease,background .15s ease}
+.ld-grip-spacer{flex:none;height:6px}
+.ld-grip:hover::after,.ld-grip:active::after{opacity:1;background:var(--dsw-alias-brand-primary)}
+.ld-grip.is-pinned::after{opacity:.95;background:var(--dsw-alias-brand-primary)}
+.ld-pane-top{flex:none;display:flex;flex-direction:column;min-height:0;position:relative}
+.ld-split{flex:none;width:8px;align-self:stretch;position:relative;touch-action:none;cursor:col-resize;background:transparent;z-index:4}
+.ld-split::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:1px;background:var(--dsw-alias-border-l1);transition:background .15s ease,width .15s ease}
+.ld-split:hover::after,.ld-split:active::after{left:3px;width:3px;border-radius:2px;background:var(--dsw-alias-brand-primary)}
+.ld-page-grip{position:absolute;top:0;bottom:0;right:-4px;width:12px;cursor:ew-resize;touch-action:none;z-index:3;background:transparent}
+.ld-page-grip::after{content:"";position:absolute;top:10px;bottom:10px;right:5px;width:2px;border-radius:2px;background:var(--dsw-alias-border-l2);opacity:.35;transition:opacity .15s ease,background .15s ease}
+.ld-page-grip:hover::after,.ld-page-grip:active::after{opacity:.9;background:var(--dsw-alias-brand-primary)}
+.ld-head{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 14px 8px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
+.ld-brand{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;white-space:nowrap;min-width:0;overflow:hidden;flex:0 1 auto}
+.ld-brand>svg,.ld-toggle>svg,.ld-empty>svg{flex:none}
+.ld-head-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-left:auto}
+.ld-doc-select{height:28px;max-width:190px;padding:0 6px;border-radius:7px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}
+.ld-doc-select:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}
 .ld-btn{height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .ld-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}
 .ld-btn.primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
@@ -222,8 +435,9 @@ window.__ModuleLoader__.load({
 .ld-panes{flex:1;display:flex;min-height:0}
 .ld-pane{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--dsw-alias-border-l1)}
 .ld-pane:last-child{border-right:0}
-.ld-panehead{display:flex;align-items:flex-start;gap:10px;padding:10px 14px 8px}
-.ld-titles{flex:1;min-width:0}
+.ld-panehead{display:flex;align-items:flex-start;flex-wrap:wrap;gap:10px;padding:10px 14px 8px}
+.ld-panehead.is-movable{cursor:move}
+.ld-titles{flex:1 1 200px;min-width:0}
 .ld-title{border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:15px;font-weight:600;width:100%;padding:2px 4px;border-radius:6px;outline:none}
 .ld-title:hover{background:var(--dsw-alias-bg-layer-2)}
 .ld-title:focus{background:var(--dsw-alias-bg-layer-2);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary)}
@@ -237,15 +451,16 @@ window.__ModuleLoader__.load({
 .ld-tool:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ld-tool.bold{font-weight:700}.ld-tool.italic{font-style:italic}.ld-tool.under{text-decoration:underline}
 .ld-sep{width:1px;height:16px;background:var(--dsw-alias-border-l1);margin:0 4px}
-.ld-body{flex:1;overflow:auto;background:var(--dsw-alias-bg-base);padding:22px 26px 90px;scroll-behavior:smooth;display:flex;gap:14px;justify-content:center;align-items:flex-start}
+.ld-body{--ld-outline-span:0px;flex:1;overflow:auto;background:var(--dsw-alias-bg-base);padding:22px 26px 90px;scroll-behavior:smooth;display:flex;gap:6px;justify-content:center;align-items:flex-start}
 .ld-body.is-dropping{outline:2px dashed var(--dsw-alias-brand-primary);outline-offset:-8px}
-.ld-outline{position:sticky;top:0;flex:none;width:168px;max-height:calc(100vh - 300px);overflow:auto;padding:4px 2px;scrollbar-width:thin}
+.ld-body.has-outline{--ld-outline-span:calc(clamp(120px,var(--ld-outline-pct,18%),340px) + 20px)}
+.ld-outline{position:sticky;top:0;flex:none;width:clamp(120px,var(--ld-outline-pct,18%),340px);max-height:100%;overflow:auto;padding:4px 2px;scrollbar-width:thin}
 .ld-outline-item{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1.5;padding:3px 6px;border-radius:5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ld-outline-item:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ld-outline-item.on{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}
 .ld-outline-item[data-level="2"]{padding-left:16px}
 .ld-outline-item[data-level="3"]{padding-left:26px}
-.ld-page{flex:1;min-width:0;max-width:760px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:40px 48px 60px;min-height:70%;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+.ld-page{position:relative;flex:1;min-width:0;max-width:clamp(420px,calc((100% - var(--ld-outline-span,0px)) / 100 * var(--ld-page-pct,95)),1400px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:40px 48px 60px;min-height:70%;box-shadow:0 8px 30px rgba(0,0,0,.08)}
 .ld-block{position:relative;margin:0 0 10px;border-radius:6px;outline:none}
 .ld-block[data-type="p"]{font-size:15px;line-height:1.95;text-align:justify}
 .ld-block[data-type="h1"]{font-size:25px;font-weight:700;line-height:1.45;margin:26px 0 14px}
@@ -521,7 +736,10 @@ window.__ModuleLoader__.load({
 
     // ---- one document pane ----------------------------------------------
 
-    function DocPane({ docId, isPrimary, embedded, docs, onPickDoc, onState, onActive, toast }) {
+    function DocPane({
+      docId, isPrimary, embedded, docs, onPickDoc, onState, onActive, toast,
+      headerActions, windowActions, onPanelDrag, onPanelReset,
+    }) {
       const [doc, setDoc] = useState(null);
       const [busy, setBusy] = useState(false);
       const [title, setTitle] = useState('');
@@ -531,6 +749,7 @@ window.__ModuleLoader__.load({
       const [outlineOn, setOutlineOn] = useState(() => window.localStorage.getItem('dsh.liveDoc.outline') !== '0');
       const [activeHeading, setActiveHeading] = useState(null);
       const [dropping, setDropping] = useState(false);
+      const layout = useLayout();
 
       const bodyRef = useRef(null);
       const titleRef = useRef(null);
@@ -945,21 +1164,67 @@ window.__ModuleLoader__.load({
       }, label);
 
       if (doc === null) {
-        return h('div', { className: 'ld-empty' },
-          h(DocumentIcon, { size: 42 }),
-          h('h3', null, T.empty),
-          h('p', null, T.emptyHint),
-          (docs ?? []).length > 0
-            ? h('div', { className: 'ld-tablebar' },
-              (docs ?? []).slice(0, 8).map((entry) => h('button', {
-                key: entry.id,
-                className: 'ld-btn',
-                onClick: () => onPickDoc?.(entry.id),
-              }, entry.title)))
-            : null);
+        // The panel head may be hidden by now (a document id is selected), so
+        // keep the panel controls reachable while this pane has nothing to show.
+        return h(React.Fragment, null,
+          headerActions === undefined
+            ? null
+            : h('div', {
+              className: `ld-panehead${onPanelDrag === undefined ? '' : ' is-movable'}`,
+              onPointerDown: onPanelDrag,
+              onDoubleClick: onPanelReset,
+            },
+              h('div', { className: 'ld-head-actions' }, headerActions, windowActions)),
+          h('div', { className: 'ld-empty' },
+            h(DocumentIcon, { size: 42 }),
+            h('h3', null, T.empty),
+            h('p', null, T.emptyHint),
+            (docs ?? []).length > 0
+              ? h('div', { className: 'ld-tablebar' },
+                (docs ?? []).slice(0, 8).map((entry) => h('button', {
+                  key: entry.id,
+                  className: 'ld-btn',
+                  onClick: () => onPickDoc?.(entry.id),
+                }, entry.title)))
+              : null));
       }
 
       const blocks = doc.blocks ?? [];
+      const headingCount = blocks.filter((block) => (
+        block.type === 'h1' || block.type === 'h2' || block.type === 'h3'
+      ) && blockText(block).trim().length > 0).length;
+      const showOutline = outlineOn && headingCount >= 2;
+
+      /** Width the document body really has to work with, scrollbar excluded. */
+      const bodyRoom = () => {
+        const body = bodyRef.current;
+        if (body === null) return 800;
+        const style = window.getComputedStyle(body);
+        const left = Number.parseFloat(style.paddingLeft);
+        const right = Number.parseFloat(style.paddingRight);
+        const inner = body.clientWidth
+          - (Number.isFinite(left) ? left : 0)
+          - (Number.isFinite(right) ? right : 0);
+        return Math.max(200, Math.round(inner));
+      };
+
+      /** Width left for the page once the outline column and its gaps took theirs. */
+      const pageRoom = () => {
+        const body = bodyRef.current;
+        const nav = body !== null ? body.querySelector('.ld-outline') : null;
+        const used = nav !== null && nav !== undefined
+          ? Math.round(nav.getBoundingClientRect().width) + 20
+          : 0;
+        return Math.max(240, bodyRoom() - used);
+      };
+
+      /** Store one percentage, only when a drag actually moved it. */
+      const setPct = (key, min, value) => {
+        const next = Math.round(Math.max(min, Math.min(100, value)) * 10) / 10;
+        if (next !== layoutState.value[key]) writeLayout({ [key]: next });
+      };
+
+      const grips = isPrimary !== false;
       let olIndex = 0;
       const rendered = blocks.map((block) => {
         if (block.type === 'ol') olIndex += 1;
@@ -1015,7 +1280,13 @@ window.__ModuleLoader__.load({
       };
 
       return h(React.Fragment, null,
-        h('div', { className: 'ld-panehead' },
+        h('div', { className: 'ld-pane-top' },
+        h('div', {
+          className: `ld-panehead${onPanelDrag === undefined ? '' : ' is-movable'}`,
+          onPointerDown: onPanelDrag,
+          onDoubleClick: onPanelReset,
+          title: onPanelDrag === undefined ? undefined : T.dragHint,
+        },
           h('div', { className: 'ld-titles' },
             h('input', {
               ref: titleRef,
@@ -1035,8 +1306,15 @@ window.__ModuleLoader__.load({
               h('span', { className: 'pulse' }),
               error !== null ? `${T.offline}：${error}` : busy ? T.busy : `${T.sync} · rev ${doc.rev}`)),
           h('div', { className: 'ld-head-actions' },
-            h('button', { className: 'ld-btn primary', onClick: () => void exportDoc() }, T.export))),
-        h('div', { className: 'ld-tools' },
+            headerActions ?? null,
+            h('button', {
+              className: 'ld-btn',
+              title: layout.folded ? T.unfoldTools : T.foldTools,
+              onClick: () => writeLayout({ folded: !layout.folded }),
+            }, `${layout.folded ? '▾' : '▴'} ${T.tools}`),
+            h('button', { className: 'ld-btn primary', onClick: () => void exportDoc() }, T.export),
+            windowActions ?? null)),
+        layout.folded ? null : h('div', { className: 'ld-tools' },
           toolButton(T.p, () => retype('p')),
           toolButton(T.h1, () => retype('h1')),
           toolButton(T.h2, () => retype('h2')),
@@ -1071,8 +1349,20 @@ window.__ModuleLoader__.load({
               void uploadImage(file);
             },
           })),
+        grips
+          ? h('div', {
+            className: `ld-grip${layout.folded ? ' is-pinned' : ''}`,
+            title: T.gripPane,
+            onPointerDown: (event) => beginCollapse(event, {
+              collapsed: layout.folded,
+              onToggle: (collapse) => writeLayout({ folded: collapse }),
+            }),
+            onDoubleClick: () => writeLayout({ folded: false }),
+          })
+          : h('div', { className: 'ld-grip-spacer' })),
         h('div', {
-          className: `ld-body${dropping ? ' is-dropping' : ''}`,
+          className: `ld-body${dropping ? ' is-dropping' : ''}${showOutline ? ' has-outline' : ''}`,
+          style: { '--ld-outline-pct': `${layout.outlinePct}%`, '--ld-page-pct': `${layout.pagePct}` },
           ref: bodyRef,
           onScroll: onScroll,
           onPaste: (event) => {
@@ -1103,9 +1393,48 @@ window.__ModuleLoader__.load({
             void uploadImage(file);
           },
         },
-        outlineOn ? h(Outline, { blocks, activeId: activeHeading, onJump: jump }) : null,
+        showOutline
+          ? h(Outline, { blocks, activeId: activeHeading, onJump: jump })
+          : null,
+        showOutline && grips
+          ? h('div', {
+            className: 'ld-split',
+            title: T.gripOutline,
+            onPointerDown: (event) => {
+              const room = Math.max(240, bodyRoom());
+              beginResize(event, {
+                axis: 'x',
+                start: layout.outlinePct,
+                min: LAYOUT_LIMITS.outlineMinPct,
+                max: LAYOUT_LIMITS.outlineMaxPct,
+                scale: 100 / room,
+                apply: (value) => setPct('outlinePct', LAYOUT_LIMITS.outlineMinPct, value),
+              });
+            },
+            onDoubleClick: () => writeLayout({ outlinePct: LAYOUT_DEFAULT.outlinePct }),
+          })
+          : null,
         h('div', { className: 'ld-page' },
           rendered,
+          grips
+            ? h('div', {
+              className: 'ld-page-grip',
+              title: T.gripPage,
+              onPointerDown: (event) => {
+                // The page is centred, so each edge moves half of a width change.
+                const room = pageRoom();
+                beginResize(event, {
+                  axis: 'x',
+                  start: layout.pagePct,
+                  min: LAYOUT_LIMITS.pageMinPct,
+                  max: LAYOUT_LIMITS.pageMaxPct,
+                  scale: 200 / room,
+                  apply: (value) => setPct('pagePct', LAYOUT_LIMITS.pageMinPct, value),
+                });
+              },
+              onDoubleClick: () => writeLayout({ pagePct: LAYOUT_DEFAULT.pagePct }),
+            })
+            : null,
           h('button', {
             className: 'ld-add',
             onClick: () => void createBlock(blocks.length > 0 ? blocks[blocks.length - 1].id : undefined, 'p'),
@@ -1217,8 +1546,10 @@ window.__ModuleLoader__.load({
       const [splitId, setSplitId] = useState(() => window.localStorage.getItem('dsh.liveDoc.split'));
       const [toast, setToast] = useState(null);
       const [geometry, setGeometry] = useState(readGeometry);
+      const layout = useLayout();
       const [maximized, setMaximized] = useState(false);
       const restoreRef = useRef(null);
+      const panesRef = useRef(null);
       const toastTimer = useRef(null);
       const closedRef = useRef(new Set());
 
@@ -1291,6 +1622,18 @@ window.__ModuleLoader__.load({
           if (timer !== null) clearTimeout(timer);
         };
       }, [open, embedded]);
+
+      // Tell the user once that the header, the outline and the page resize.
+      useEffect(() => {
+        if (!open && !embedded) return;
+        try {
+          if (window.localStorage.getItem('dsh.liveDoc.layoutHint2') === '1') return;
+          window.localStorage.setItem('dsh.liveDoc.layoutHint2', '1');
+        } catch {
+          return;
+        }
+        showToast(T.layoutHint);
+      }, [open, embedded, showToast]);
 
       const dismiss = useCallback(() => {
         if (primaryId !== null) window.sessionStorage.setItem('dsh.liveDoc.dismissed', primaryId);
@@ -1370,6 +1713,17 @@ window.__ModuleLoader__.load({
         window.addEventListener('pointerup', up);
       }, [embedded, geometry]);
 
+      /** Drag the divider between two panes to change their width ratio. */
+      const beginSplitResize = useCallback((event) => {
+        const box = panesRef.current?.getBoundingClientRect();
+        if (box === undefined || box === null || box.width <= 0) return;
+        trackPointer(event, (clientX) => {
+          const ratio = ((clientX - box.left) / box.width) * 100;
+          const value = Math.round(Math.min(Math.max(ratio, LAYOUT_LIMITS.splitMin), LAYOUT_LIMITS.splitMax));
+          if (value !== layoutState.value.splitPct) writeLayout({ splitPct: value });
+        });
+      }, []);
+
       const toggleMaximize = useCallback(() => {
         if (embedded) return;
         if (maximized) {
@@ -1394,6 +1748,58 @@ window.__ModuleLoader__.load({
         .map((id) => ({ id, title: docs.find((entry) => entry.id === id)?.title ?? T.newDoc }))
         .filter((tab) => tab !== undefined);
 
+      // A single open document needs no tab strip, and a collapsed strip keeps
+      // the documents reachable through the picker in the header.
+      const showTabs = tabs.length > 1 && !layout.tabsHidden;
+      const showPicker = tabs.length > 1 && layout.tabsHidden;
+      const compact = layout.folded && (tabs.length < 2 || layout.tabsHidden);
+
+      // With a document open the panel's own title row is redundant: its
+      // controls move into the document title row, and that row becomes the
+      // drag handle. The row only stays for the empty state and for split view,
+      // where each pane is too narrow to carry the panel controls.
+      const showHead = primaryId === null || splitId !== null;
+
+      const panelControls = () => h(React.Fragment, null,
+        showPicker
+          ? h('select', {
+            className: 'ld-doc-select',
+            value: primaryId ?? '',
+            onChange: (event) => void selectDoc(event.target.value),
+            title: T.open,
+          }, tabs.map((tab) => h('option', { key: tab.id, value: tab.id }, tab.title)))
+          : null,
+        h('button', {
+          className: `ld-btn${compact ? ' on' : ''}`,
+          onClick: () => writeLayout(compact
+            ? { tabsHidden: false, folded: false }
+            : { tabsHidden: true, folded: true }),
+          title: compact ? T.compactOff : T.compactOn,
+        }, T.compact),
+        h('button', {
+          className: `ld-btn${splitId !== null ? ' on' : ''}`,
+          onClick: toggleSplit,
+          title: T.split,
+        }, splitId !== null ? T.unsplit : T.split),
+        h('button', { className: 'ld-btn primary', onClick: () => void createDoc() }, T.create));
+
+      const windowControls = () => (embedded ? null : h(React.Fragment, null,
+        h('button', {
+          className: `ld-btn${maximized ? ' on' : ''}`,
+          onClick: toggleMaximize,
+          title: maximized ? T.restore : T.maximize,
+        }, maximized ? '⤡' : '⤢'),
+        h('button', { className: 'ld-btn', onClick: dismiss }, T.close)));
+
+      /** Move the panel from any spot on the title row that is not a control. */
+      const beginPanelDrag = (event) => {
+        if (embedded) return;
+        const target = event.target;
+        if (target !== null && typeof target.closest === 'function'
+          && target.closest('button, input, select, textarea, a, .ld-tab') !== null) return;
+        beginInteraction(event, 'move');
+      };
+
       return h(React.Fragment, null,
         h(Style),
         h('div', { className: `ld-layer${embedded ? ' is-embedded' : ''}` },
@@ -1416,51 +1822,52 @@ window.__ModuleLoader__.load({
                 beginInteraction(event, 'resize', direction);
               },
             })),
-            h('div', {
-              className: 'ld-head',
-              onPointerDown: (event) => {
-                if (embedded) return;
-                const target = event.target;
-                if (target !== null && typeof target.closest === 'function'
-                  && target.closest('button, input, select, textarea, a, .ld-tab') !== null) return;
-                beginInteraction(event, 'move');
-              },
-              onDoubleClick: () => resetGeometry(),
-              title: T.dragHint,
-            },
-              h('div', { className: 'ld-brand' }, h(DocumentIcon, { size: 15 }), T.title),
-              h('div', { className: 'ld-head-actions' },
-                h('button', {
-                  className: `ld-btn${splitId !== null ? ' on' : ''}`,
-                  onClick: toggleSplit,
-                  title: T.split,
-                }, splitId !== null ? T.unsplit : T.split),
-                h('button', { className: 'ld-btn primary', onClick: () => void createDoc() }, T.create),
-                embedded ? null : h('button', {
-                  className: `ld-btn${maximized ? ' on' : ''}`,
-                  onClick: toggleMaximize,
-                  title: maximized ? T.restore : T.maximize,
-                }, maximized ? '⤡' : '⤢'),
-                embedded ? null : h('button', { className: 'ld-btn', onClick: dismiss }, T.close))),
-            tabs.length > 0
-              ? h('div', { className: 'ld-tabs' },
-                tabs.map((tab) => h('button', {
-                  key: tab.id,
-                  className: `ld-tab${tab.id === primaryId ? ' on' : ''}`,
-                  onClick: () => void selectDoc(tab.id),
-                  title: tab.title,
-                },
-                h('span', { className: 'label' }, tab.title),
-                h('span', {
-                  className: 'x',
-                  onClick: (event) => {
-                    event.stopPropagation();
-                    closeTab(tab.id);
+            showHead || showTabs || tabs.length > 1
+              ? h('div', { className: 'ld-chrome' },
+                showHead
+                  ? h('div', {
+                    className: 'ld-head',
+                    onPointerDown: beginPanelDrag,
+                    onDoubleClick: () => resetGeometry(),
+                    title: T.dragHint,
                   },
-                }, '×'))))
+                    h('div', { className: 'ld-brand' }, h(DocumentIcon, { size: 15 }), T.title),
+                    h('div', { className: 'ld-head-actions' }, panelControls(), windowControls()))
+                  : null,
+                showTabs
+                  ? h('div', { className: 'ld-tabs' },
+                    tabs.map((tab) => h('button', {
+                      key: tab.id,
+                      className: `ld-tab${tab.id === primaryId ? ' on' : ''}`,
+                      onClick: () => void selectDoc(tab.id),
+                      title: tab.title,
+                    },
+                    h('span', { className: 'label' }, tab.title),
+                    h('span', {
+                      className: 'x',
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        closeTab(tab.id);
+                      },
+                    }, '×'))))
+                  : null,
+                tabs.length > 1
+                  ? h('div', {
+                    className: `ld-grip${layout.tabsHidden ? ' is-pinned' : ''}`,
+                    title: T.gripChrome,
+                    onPointerDown: (event) => beginCollapse(event, {
+                      collapsed: layout.tabsHidden,
+                      onToggle: (collapse) => writeLayout({ tabsHidden: collapse }),
+                    }),
+                    onDoubleClick: () => writeLayout({ tabsHidden: false }),
+                  })
+                  : null)
               : null,
-            h('div', { className: 'ld-panes' },
-              h('div', { className: 'ld-pane' },
+            h('div', { className: 'ld-panes', ref: panesRef },
+              h('div', {
+                className: 'ld-pane',
+                style: splitId !== null ? { flexGrow: layout.splitPct, flexBasis: 0 } : undefined,
+              },
                 h(DocPane, {
                   key: 'primary',
                   docId: primaryId,
@@ -1471,9 +1878,24 @@ window.__ModuleLoader__.load({
                   onState,
                   onActive,
                   toast: showToast,
+                  headerActions: showHead ? undefined : panelControls(),
+                  windowActions: showHead ? undefined : windowControls(),
+                  onPanelDrag: showHead || embedded ? undefined : beginPanelDrag,
+                  onPanelReset: showHead || embedded ? undefined : () => resetGeometry(),
                 })),
               splitId !== null
-                ? h('div', { className: 'ld-pane' },
+                ? h('div', {
+                  className: 'ld-split',
+                  title: T.gripSplit,
+                  onPointerDown: beginSplitResize,
+                  onDoubleClick: () => writeLayout({ splitPct: LAYOUT_DEFAULT.splitPct }),
+                })
+                : null,
+              splitId !== null
+                ? h('div', {
+                  className: 'ld-pane',
+                  style: { flexGrow: 100 - layout.splitPct, flexBasis: 0 },
+                },
                   h(DocPane, {
                     key: `split-${splitId}`,
                     docId: splitId,
@@ -1533,7 +1955,7 @@ window.__ModuleLoader__.load({
 
     /** The glyph used by the left sidebar's global panel row. */
     function SidebarIcon(props = {}) {
-      return DocumentIcon(props.size ?? 18);
+      return h(DocumentIcon, { size: props.size ?? 18 });
     }
 
     /** The full-page document workspace opened from the left sidebar. */

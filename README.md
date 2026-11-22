@@ -22,6 +22,7 @@ Long documents are painful to generate in one shot: the model writes 5,000 words
 ## Features
 
 - **A free-floating sidebar** — drag the header to move the panel, resize it from any edge or corner, and it snaps flush to a screen edge (snap it right and it reads as a right sidebar). Maximize/restore, remembered geometry per browser, double-click the header to reset.
+- **The document title row is the top row** — once a document is open the panel's own title bar is gone: New / Split / Compact move into the document title row, which doubles as the floating panel's drag handle (double-click resets), with maximize and close at its end; the separate bar returns only for an empty panel and for split view. The tab strip and the toolbar still fold away whole, and the outline and page widths stay proportional
 - **Left sidebar workspace** — a global **Live document** row in the left sidebar opens a full-page document workspace at any time, even without a chat session. The floating panel and header button remain for editing beside the conversation.
 - **Block-level co-editing** — headings 1–3, paragraphs, bullet and numbered lists, quotes, code, dividers; bold / italic / underline; Enter creates the next paragraph, Backspace on an empty one deletes it.
 - **One shared document** — agent tools and the browser panel read and write the same block list; the browser saves with a per-block base revision, so an agent write and your edit never silently overwrite each other.
