@@ -47,6 +47,16 @@
 
 **插件 → 添加插件**，输入 `dsh-live-doc`。装完刷新一次页面（`Cmd+R` / `Ctrl+R`），让浏览器半边注册。
 
+### 直接下载打包好的插件
+
+每个版本的安装包放在 [`dist/`](https://github.com/jiayiliust-ops/dsh-live-doc/tree/main/dist)
+里，例如 [`dsh-live-doc-1.3.1.tgz`](https://github.com/jiayiliust-ops/dsh-live-doc/raw/main/dist/dsh-live-doc-1.3.1.tgz)。
+下载后按「从本地目录」那条安装，或用：
+
+```bash
+dsh plugin --profile web add https://github.com/jiayiliust-ops/dsh-live-doc/raw/main/dist/dsh-live-doc-1.3.1.tgz
+```
+
 ### 命令行
 
 ```bash

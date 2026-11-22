@@ -44,6 +44,17 @@ Long documents are painful to generate in one shot: the model writes 5,000 words
 
 **Plugins → Add plugin** and enter `dsh-live-doc`. After installation, reload the page once (`Cmd+R` / `Ctrl+R`) so the browser half is registered.
 
+### Download the packed plugin
+
+Every release ships its installable tarball under
+[`dist/`](https://github.com/jiayiliust-ops/dsh-live-doc/tree/main/dist), for example
+[`dsh-live-doc-1.3.1.tgz`](https://github.com/jiayiliust-ops/dsh-live-doc/raw/main/dist/dsh-live-doc-1.3.1.tgz).
+Download it and install the file (see below), or:
+
+```bash
+dsh plugin --profile web add https://github.com/jiayiliust-ops/dsh-live-doc/raw/main/dist/dsh-live-doc-1.3.1.tgz
+```
+
 ### CLI
 
 ```bash
